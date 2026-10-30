@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "trialsniper",
+  "version": "${version}",
+  "name": "Trial Sniper",
+  "description": "Client-side Ominous Vault Heavy Core display sniper for Minecraft 26.2.",
+  "authors": ["REST"],
+  "license": "MIT",
+  "environment": "client",
+  "mixins": [
+    {
+      "config": "trialsniper.mixins.json",
+      "environment": "client"
+    }
+  ],
+  "depends": {
+    "fabricloader": ">=0.19.3",
+    "minecraft": "26.2",
+    "java": ">=25"
+  }
+}
