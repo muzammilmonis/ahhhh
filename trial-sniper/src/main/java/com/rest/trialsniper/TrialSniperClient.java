@@ -7,12 +7,10 @@ import net.minecraft.core.Direction;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.Item;
-import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.VaultBlock;
-import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraft.world.level.block.entity.vault.VaultBlockEntity;
+import net.minecraft.world.level.block.entity.vault.VaultState;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
@@ -47,12 +45,13 @@ public final class TrialSniperClient {
         scanInteractionRange(client);
     }
 
-    public static void onBlockEntityUpdate(BlockPos pos) {
+    /** Fast path called after either a block-state or block-entity update. */
+    public static void onVaultUpdate(BlockPos pos) {
         Minecraft client = Minecraft.getInstance();
         if (!ready(client) || hasHeavyCore(client.player)) {
             return;
         }
-        trySnipe(client, pos);
+        tryOpen(client, pos);
     }
 
     private static boolean ready(Minecraft client) {
@@ -77,14 +76,8 @@ public final class TrialSniperClient {
                     if (distance >= bestDistance) continue;
 
                     BlockState state = client.level.getBlockState(pos);
-                    if (state.getBlock() != Blocks.VAULT || !state.getValue(VaultBlock.OMINOUS)) continue;
+                    if (!isReadyOminousVault(state)) continue;
                     if (!player.isWithinBlockInteractionRange(pos, 0.0)) continue;
-
-                    BlockEntity blockEntity = client.level.getBlockEntity(pos);
-                    if (!(blockEntity instanceof VaultBlockEntity vault)) continue;
-
-                    ItemStack displayed = vault.getSharedData().getDisplayItem();
-                    if (!displayed.is(Items.HEAVY_CORE)) continue;
 
                     bestPos = pos.immutable();
                     bestDistance = distance;
@@ -92,26 +85,24 @@ public final class TrialSniperClient {
             }
         }
 
-        if (bestPos != null) trySnipe(client, bestPos);
+        if (bestPos != null) {
+            tryOpen(client, bestPos);
+        }
     }
 
-    private static boolean trySnipe(Minecraft client, BlockPos pos) {
+    private static boolean tryOpen(Minecraft client, BlockPos pos) {
         LocalPlayer player = client.player;
         long now = client.level.getGameTime();
 
-        if (lastAttemptPos != null && lastAttemptPos.equals(pos) && now - lastAttemptTick < RETRY_COOLDOWN_TICKS) {
+        if (lastAttemptPos != null
+            && lastAttemptPos.equals(pos)
+            && now - lastAttemptTick < RETRY_COOLDOWN_TICKS) {
             return false;
         }
 
         BlockState state = client.level.getBlockState(pos);
-        if (state.getBlock() != Blocks.VAULT || !state.getValue(VaultBlock.OMINOUS)) return false;
+        if (!isReadyOminousVault(state)) return false;
         if (!player.isWithinBlockInteractionRange(pos, 0.0)) return false;
-
-        BlockEntity blockEntity = client.level.getBlockEntity(pos);
-        if (!(blockEntity instanceof VaultBlockEntity vault)) return false;
-
-        ItemStack displayed = vault.getSharedData().getDisplayItem();
-        if (!displayed.is(Items.HEAVY_CORE)) return false;
 
         InteractionHand hand;
         if (player.getOffhandItem().is(Items.OMINOUS_TRIAL_KEY)) {
@@ -132,19 +123,34 @@ public final class TrialSniperClient {
             hand = InteractionHand.MAIN_HAND;
         }
 
-        BlockHitResult hit = new BlockHitResult(Vec3.atCenterOf(pos), Direction.UP, pos, false);
+        // Vanilla interaction manager syncs the selected slot before the use-on-block packet.
+        // No display-item wait: the display is unrelated to the actual reward roll.
+        BlockHitResult hit = new BlockHitResult(
+            Vec3.atCenterOf(pos),
+            Direction.UP,
+            pos,
+            false
+        );
+
         lastAttemptPos = pos.immutable();
         lastAttemptTick = now;
 
         client.gameMode.useItemOn(player, hand, hit);
         player.swing(hand);
-        player.sendSystemMessage(Component.literal("§6§lTRIAL SNIPER §8» §eHeavy Core shown §8→ §aCLICKED"));
+        player.sendSystemMessage(Component.literal("§6§lTRIAL SNIPER §8» §aINSTANT VAULT CLICK"));
         return true;
+    }
+
+    private static boolean isReadyOminousVault(BlockState state) {
+        return state.getBlock() == Blocks.VAULT
+            && state.getValue(VaultBlock.OMINOUS)
+            && state.getValue(VaultBlock.STATE) == VaultState.ACTIVE;
     }
 
     private static int findHotbarSlot(LocalPlayer player, Item target) {
         int selected = player.getInventory().getSelectedSlot();
         if (player.getInventory().getSelectedItem().is(target)) return selected;
+
         for (int slot = 0; slot < 9; slot++) {
             if (player.getInventory().getItem(slot).is(target)) return slot;
         }
